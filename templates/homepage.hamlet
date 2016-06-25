@@ -1,6 +1,15 @@
 <h1.jumbotron>
   Welcome to Yesod!
 
+<.page-header><h2>AdwaitaWorldBot
+
+<section.page-header>
+  <h2>Commands
+  <form method=get action=@{BotRefreshR}>
+    <button .btn .btn-primary type="submit">
+        Send getUpdates
+
+
 <.page-header><h2>Starting
 
 <section.list-group>
