@@ -89,9 +89,13 @@ decodeUpdates s = do
   decoded <- Json.eitherDecode s
   parseEither (unwrap "updates") decoded
 
+handleUpdates :: (MonadThrow m, MonadIO m) => [Update] -> m ()
+handleUpdates updates = print updates
+
 getBotRefreshR :: Handler ()
 getBotRefreshR = do
   response <- apiCall "getUpdates"
   putStrLn $ "The status code was: " ++
                (pack . show) (getResponseStatusCode response)
-  print $ decodeUpdates (getResponseBody response)
+  either fail handleUpdates (decodeUpdates (getResponseBody response))
+  return ()
