@@ -1,15 +1,22 @@
 {-# LANGUAGE DeriveGeneric #-}
 module Handler.Bot where
 
-import Import hiding (Update)
+import Import hiding (Update, User)
 import Network.HTTP.Simple
 import Data.Aeson as Json
-import Data.Aeson.Types (Parser, parseEither)
+import Data.Aeson.Types (Parser, parseEither, Options(..), camelTo2)
 import qualified Data.ByteString.Lazy as B
+
+data User = User {
+    id :: Int
+  , firstName :: Text
+  , lastName :: Maybe Text
+  , username :: Maybe Text
+  } deriving (Generic, Show)
 
 data Message = Message {
     message_id :: Int
- -- , from
+    , from :: User
     , text :: Maybe Text
     , entities :: Maybe [MessageEntity]
   } deriving (Generic, Show)
@@ -29,6 +36,19 @@ data Update = Update {
   , edited_message :: Maybe Message
   } deriving (Generic, Show)
 
+instance FromJSON Update
+instance FromJSON User where
+  parseJSON = genericParseJSON defaultOptions {
+    fieldLabelModifier = camelTo2 '_' }
+
+instance FromJSON Message
+instance FromJSON MessageEntity where
+  parseJSON = withObject "message entity" $ \o -> do
+    t <- parseEntityType =<< (o .: "type")
+    offset <- o .: "offset"
+    len <- o .: "length"
+    return $ MessageEntity t offset len
+
 parseEntityType :: Value -> Parser EntityType
 parseEntityType = withText "entity type" $ \t -> do
   return $ case t of
@@ -36,15 +56,6 @@ parseEntityType = withText "entity type" $ \t -> do
     "mention" -> Mention
     _ -> Unsupported
 
-instance FromJSON Update
-instance FromJSON Message
-instance FromJSON MessageEntity where
-  parseJSON = withObject "message entity" $ \o -> do
-    v <- (o .: "type")
-    t <- parseEntityType v
-    offset <- o .: "offset"
-    len <- o .: "length"
-    return $ MessageEntity t offset len
 
 unwrap :: FromJSON a => String -> Value -> Parser [a]
 unwrap name = withObject name $ \o -> o .: "result"
