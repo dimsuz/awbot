@@ -11,6 +11,16 @@ data Message = Message {
     message_id :: Int
  -- , from
     , text :: Maybe Text
+    , entities :: Maybe [MessageEntity]
+  } deriving (Generic, Show)
+
+data EntityType = BotCommand | Mention | Unsupported
+                  deriving Show
+
+data MessageEntity = MessageEntity {
+  entityType :: EntityType
+  , offset :: Int
+  , length :: Int
   } deriving (Generic, Show)
 
 data Update = Update {
@@ -19,8 +29,22 @@ data Update = Update {
   , edited_message :: Maybe Message
   } deriving (Generic, Show)
 
+parseEntityType :: Value -> Parser EntityType
+parseEntityType = withText "entity type" $ \t -> do
+  return $ case t of
+    "bot_command" -> BotCommand
+    "mention" -> Mention
+    _ -> Unsupported
+
 instance FromJSON Update
 instance FromJSON Message
+instance FromJSON MessageEntity where
+  parseJSON = withObject "message entity" $ \o -> do
+    v <- (o .: "type")
+    t <- parseEntityType v
+    offset <- o .: "offset"
+    len <- o .: "length"
+    return $ MessageEntity t offset len
 
 unwrap :: FromJSON a => String -> Value -> Parser [a]
 unwrap name = withObject name $ \o -> o .: "result"
