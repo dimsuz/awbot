@@ -8,15 +8,20 @@ import Data.Aeson.Types (Parser, parseEither, Options(..), camelTo2)
 import qualified Data.ByteString.Lazy as B
 
 data User = User {
-    id :: Int
+    userId :: Int
   , firstName :: Text
   , lastName :: Maybe Text
   , username :: Maybe Text
   } deriving (Generic, Show)
 
+data Chat = Chat {
+  chatId :: Int64
+  } deriving (Generic, Show)
+
 data Message = Message {
     message_id :: Int
     , from :: User
+    , chat :: Chat
     , text :: Maybe Text
     , entities :: Maybe [MessageEntity]
   } deriving (Generic, Show)
@@ -39,7 +44,12 @@ data Update = Update {
 instance FromJSON Update
 instance FromJSON User where
   parseJSON = genericParseJSON defaultOptions {
-    fieldLabelModifier = camelTo2 '_' }
+    fieldLabelModifier = \k ->
+        if k == "userId" then (disambiguateId "userId" k) else (camelTo2 '_' k) }
+
+instance FromJSON Chat where
+  parseJSON = genericParseJSON defaultOptions {
+    fieldLabelModifier = disambiguateId "chatId" }
 
 instance FromJSON Message
 instance FromJSON MessageEntity where
@@ -48,6 +58,12 @@ instance FromJSON MessageEntity where
     offset <- o .: "offset"
     len <- o .: "length"
     return $ MessageEntity t offset len
+
+-- maps a custom id key name to an "id" key. Needed because multiple
+-- models use "id" in json and this plays bad with absence of DuplicateRecordFields extension
+-- in current version of GHC...
+disambiguateId :: String -> String -> String
+disambiguateId idKey = \k -> if (k == idKey) then "id" else k
 
 parseEntityType :: Value -> Parser EntityType
 parseEntityType = withText "entity type" $ \t -> do
