@@ -41,6 +41,11 @@ data Update = Update {
   , edited_message :: Maybe Message
   } deriving (Generic, Show)
 
+data SendMessageParams = SendMessageParams {
+    sendMessageChatId :: Int64
+  , sendMessageText :: Text
+  } deriving (Generic, Show)
+
 instance FromJSON Update
 instance FromJSON User where
   parseJSON = genericParseJSON defaultOptions {
@@ -58,6 +63,13 @@ instance FromJSON MessageEntity where
     offset <- o .: "offset"
     len <- o .: "length"
     return $ MessageEntity t offset len
+
+instance ToJSON SendMessageParams where
+  -- again, playing games with prefixes due to duplicate record fields errors
+  toJSON = genericToJSON defaultOptions {
+    fieldLabelModifier = \k ->
+        camelTo2 '_' (maybe k id (stripPrefix "sendMessage" k))
+    }
 
 -- maps a custom id key name to an "id" key. Needed because multiple
 -- models use "id" in json and this plays bad with absence of DuplicateRecordFields extension
@@ -79,18 +91,22 @@ unwrap name = withObject name $ \o -> o .: "result"
 token :: Text
 token = "200098948:AAE-bwgutgijahNPYpmQbKBARI7Rh-wFAbM"
 
-apiCall :: (MonadThrow m, MonadIO m) => Text -> m (Response B.ByteString)
-apiCall methodName = do
-  request <- parseRequest (unpack ("https://api.telegram.org/bot" `mappend` token `mappend` "/" `mappend` methodName))
-  httpLBS request
+addApiRequestParams :: ToJSON a => Request -> a -> Request
+addApiRequestParams request p = setRequestBodyJSON p $ request { method = "POST" }
+
+apiCall :: (MonadThrow m, MonadIO m, ToJSON a) => Text -> Maybe a -> m (Response B.ByteString)
+apiCall methodName params = do
+  let url = (unpack ("https://api.telegram.org/bot" `mappend` token `mappend` "/" `mappend` methodName))
+  request <- parseRequest url
+  httpLBS $ maybe request (addApiRequestParams request) params
 
 decodeUpdates :: B.ByteString -> Either String [Update]
 decodeUpdates s = do
   decoded <- Json.eitherDecode s
   parseEither (unwrap "updates") decoded
 
-sendMessage :: (MonadThrow m, MonadIO m) => Int64 -> Text -> m Message
-sendMessage chatId text = fail "unimplemented"
+sendMessage :: (MonadThrow m, MonadIO m) => Int64 -> Text -> m (Response B.ByteString)
+sendMessage chatId text = apiCall "sendMessage" (Just (SendMessageParams chatId text))
 
 getChatId :: Update -> Maybe Int64
 getChatId u = do
@@ -118,7 +134,7 @@ handleUpdates updates = maybe (print updates) handleUpdate (listToMaybe updates)
 
 getBotRefreshR :: Handler ()
 getBotRefreshR = do
-  response <- apiCall "getUpdates"
+  response <- apiCall "getUpdates" (Nothing :: Maybe Value)
   putStrLn $ "The status code was: " ++
                (pack . show) (getResponseStatusCode response)
   either fail handleUpdates (decodeUpdates (getResponseBody response))
