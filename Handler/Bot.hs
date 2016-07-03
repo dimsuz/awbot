@@ -76,12 +76,12 @@ parseEntityType = withText "entity type" $ \t -> do
 unwrap :: FromJSON a => String -> Value -> Parser [a]
 unwrap name = withObject name $ \o -> o .: "result"
 
-token :: String
+token :: Text
 token = "200098948:AAE-bwgutgijahNPYpmQbKBARI7Rh-wFAbM"
 
-apiCall :: (MonadThrow m, MonadIO m) => String -> m (Response B.ByteString)
+apiCall :: (MonadThrow m, MonadIO m) => Text -> m (Response B.ByteString)
 apiCall methodName = do
-  request <- parseUrl ("https://api.telegram.org/bot" `mappend` token `mappend` "/" `mappend` methodName)
+  request <- parseRequest (unpack ("https://api.telegram.org/bot" `mappend` token `mappend` "/" `mappend` methodName))
   httpLBS request
 
 decodeUpdates :: B.ByteString -> Either String [Update]
@@ -89,8 +89,32 @@ decodeUpdates s = do
   decoded <- Json.eitherDecode s
   parseEither (unwrap "updates") decoded
 
+sendMessage :: (MonadThrow m, MonadIO m) => Int64 -> Text -> m Message
+sendMessage chatId text = fail "unimplemented"
+
+getChatId :: Update -> Maybe Int64
+getChatId u = do
+  msg <- message u
+  return $ (chatId . chat) msg
+
+getUserFirstName :: Update -> Maybe Text
+getUserFirstName u = do
+  msg <- message u
+  return $ (firstName . from) msg
+
+isStartCommand :: Update -> Bool
+isStartCommand u = True
+
+handleUpdate :: (MonadThrow m, MonadIO m) => Update -> m ()
+handleUpdate u = do
+  if isStartCommand u
+    then do chatId <- maybe (fail "failed to extract chatId") return $ getChatId u
+            userName <- maybe (fail "failed to extract userFirstName") return $ getUserFirstName u
+            sendMessage chatId ("Hello, " ++ userName) >> putStrLn "message sent"
+    else liftIO $ putStrLn "Unprocessed update"
+
 handleUpdates :: (MonadThrow m, MonadIO m) => [Update] -> m ()
-handleUpdates updates = print updates
+handleUpdates updates = maybe (print updates) handleUpdate (listToMaybe updates)
 
 getBotRefreshR :: Handler ()
 getBotRefreshR = do
