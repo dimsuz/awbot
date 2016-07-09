@@ -46,15 +46,20 @@ data SendMessageParams = SendMessageParams {
   , sendMessageText :: Text
   } deriving (Generic, Show)
 
+data GetUpdatesParams = GetUpdatesParams {
+    getUpdatesOffset :: Int
+  , getUpdatesTimeout :: Int
+  } deriving (Generic, Show)
+
 instance FromJSON Update
 instance FromJSON User where
   parseJSON = genericParseJSON defaultOptions {
     fieldLabelModifier = \k ->
-        if k == "userId" then (disambiguateId "userId" k) else (camelTo2 '_' k) }
+        if k == "userId" then (disambiguateIdModifier "userId" k) else (camelTo2 '_' k) }
 
 instance FromJSON Chat where
   parseJSON = genericParseJSON defaultOptions {
-    fieldLabelModifier = disambiguateId "chatId" }
+    fieldLabelModifier = disambiguateIdModifier "chatId" }
 
 instance FromJSON Message
 instance FromJSON MessageEntity where
@@ -67,15 +72,23 @@ instance FromJSON MessageEntity where
 instance ToJSON SendMessageParams where
   -- again, playing games with prefixes due to duplicate record fields errors
   toJSON = genericToJSON defaultOptions {
-    fieldLabelModifier = \k ->
-        camelTo2 '_' (maybe k id (stripPrefix "sendMessage" k))
+    fieldLabelModifier = stripPrefixModifier "sendMessage"
+    }
+
+instance ToJSON GetUpdatesParams where
+  -- again, playing games with prefixes due to duplicate record fields errors
+  toJSON = genericToJSON defaultOptions {
+    fieldLabelModifier = stripPrefixModifier "getUpdates"
     }
 
 -- maps a custom id key name to an "id" key. Needed because multiple
 -- models use "id" in json and this plays bad with absence of DuplicateRecordFields extension
 -- in current version of GHC...
-disambiguateId :: String -> String -> String
-disambiguateId idKey = \k -> if (k == idKey) then "id" else k
+disambiguateIdModifier :: String -> String -> String
+disambiguateIdModifier idKey = \k -> if (k == idKey) then "id" else k
+
+stripPrefixModifier :: String -> String -> String
+stripPrefixModifier prefix key = camelTo2 '_' (maybe key id (stripPrefix prefix key))
 
 parseEntityType :: Value -> Parser EntityType
 parseEntityType = withText "entity type" $ \t -> do
@@ -127,20 +140,33 @@ getUserMessage u = maybe "<nothing>" id $ do
 isStartCommand :: Update -> Bool
 isStartCommand u = True
 
-handleUpdate :: (MonadThrow m, MonadIO m) => Update -> m ()
+handleUpdate :: Update -> Handler ()
 handleUpdate u = do
   -- TODO if (message) then
     chatId <- maybe (fail "failed to extract chatId") return $ getChatId u
     userName <- maybe (fail "failed to extract userFirstName") return $ getUserFirstName u
     let message = getUserMessage u
     sendMessage chatId ("Dear " ++ userName ++ ", you said: " ++ message) >> putStrLn "message sent"
+    currentTime <- liftIO getCurrentTime
+    runDB $ insert_ $ UpdateLog (update_id u) currentTime
+    return ()
 
-handleUpdates :: (MonadThrow m, MonadIO m) => [Update] -> m ()
+handleUpdates :: [Update] -> Handler ()
 handleUpdates updates = mapM_ handleUpdate updates
+
+buildGetUpdatesParams :: Maybe (Entity UpdateLog) -> Maybe GetUpdatesParams
+buildGetUpdatesParams updateEntity = do
+  entity <- updateEntity
+  let lastUpdate = entityVal entity
+      nextId = (updateLogUpdateId lastUpdate) + 1
+  return $ GetUpdatesParams nextId 0
+
 
 getBotRefreshR :: Handler ()
 getBotRefreshR = do
-  response <- apiCall "getUpdates" (Nothing :: Maybe Value)
+  lastUpdate <- runDB $ selectFirst [] [Desc UpdateLogUpdateId]
+  let updateParams = buildGetUpdatesParams lastUpdate
+  response <- apiCall "getUpdates" updateParams
   putStrLn $ "The status code was: " ++
                (pack . show) (getResponseStatusCode response)
   either fail handleUpdates (decodeUpdates (getResponseBody response))
