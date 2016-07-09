@@ -118,19 +118,25 @@ getUserFirstName u = do
   msg <- message u
   return $ (firstName . from) msg
 
+getUserMessage :: Update -> Text
+getUserMessage u = maybe "<nothing>" id $ do
+  msg <- message u
+  t <- text msg
+  return t
+
 isStartCommand :: Update -> Bool
 isStartCommand u = True
 
 handleUpdate :: (MonadThrow m, MonadIO m) => Update -> m ()
 handleUpdate u = do
-  if isStartCommand u
-    then do chatId <- maybe (fail "failed to extract chatId") return $ getChatId u
-            userName <- maybe (fail "failed to extract userFirstName") return $ getUserFirstName u
-            sendMessage chatId ("Hello, " ++ userName) >> putStrLn "message sent"
-    else liftIO $ putStrLn "Unprocessed update"
+  -- TODO if (message) then
+    chatId <- maybe (fail "failed to extract chatId") return $ getChatId u
+    userName <- maybe (fail "failed to extract userFirstName") return $ getUserFirstName u
+    let message = getUserMessage u
+    sendMessage chatId ("Dear " ++ userName ++ ", you said: " ++ message) >> putStrLn "message sent"
 
 handleUpdates :: (MonadThrow m, MonadIO m) => [Update] -> m ()
-handleUpdates updates = maybe (print updates) handleUpdate (listToMaybe updates)
+handleUpdates updates = mapM_ handleUpdate updates
 
 getBotRefreshR :: Handler ()
 getBotRefreshR = do
