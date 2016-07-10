@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Handler.Bot where
 
 import Import hiding (Update, User)
@@ -109,8 +110,9 @@ addApiRequestParams request p = setRequestBodyJSON p $ request { method = "POST"
 
 apiCall :: (MonadThrow m, MonadIO m, ToJSON a) => Text -> Maybe a -> m (Response B.ByteString)
 apiCall methodName params = do
-  let url = (unpack ("https://api.telegram.org/bot" `mappend` token `mappend` "/" `mappend` methodName))
-  request <- parseRequest url
+  let url = "https://api.telegram.org/bot" <> token <> "/" <> methodName
+  liftIO $ putStrLn ("Sending request: " <> url)
+  request <- parseRequest (unpack url)
   httpLBS $ maybe request (addApiRequestParams request) params
 
 decodeUpdates :: B.ByteString -> Either String [Update]
@@ -147,12 +149,26 @@ handleUpdate u = do
     userName <- maybe (fail "failed to extract userFirstName") return $ getUserFirstName u
     let message = getUserMessage u
     sendMessage chatId ("Dear " ++ userName ++ ", you said: " ++ message) >> putStrLn "message sent"
-    currentTime <- liftIO getCurrentTime
-    runDB $ insert_ $ UpdateLog (update_id u) currentTime
     return ()
 
+markUpdateHandled :: Update -> Handler ()
+markUpdateHandled u = do
+  liftIO $ putStrLn $ "Marking update with id=" <> (pack . show . update_id) u <> " as handled"
+  currentTime <- liftIO getCurrentTime
+  runDB $ insert_ $ UpdateLog (update_id u) currentTime
+  return ()
+
 handleUpdates :: [Update] -> Handler ()
-handleUpdates updates = mapM_ handleUpdate updates
+handleUpdates updates = mapM_ handleUpdateAndSave updates
+  where handleUpdateAndSave u = do
+          -- try to handle update and catch possible status errors.
+          -- even if error happened, need to mark it as handled, otherwise
+          -- it will always try to get the same update over and over again...
+          catch (handleUpdate u) $ \(e :: HttpException) -> do
+            putStrLn "error! caught an exception while handling update, skipping it"
+            putStrLn $ "exception details: \n" <> (pack $ show e)
+          markUpdateHandled u
+
 
 buildGetUpdatesParams :: Maybe (Entity UpdateLog) -> Maybe GetUpdatesParams
 buildGetUpdatesParams updateEntity = do
